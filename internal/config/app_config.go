@@ -1,9 +1,14 @@
 package config
 
+// AppConfig is the root runtime configuration.
+// There must be exactly ONE definition of this type.
 type AppConfig struct {
-	Memory   MemoryConfig
-	Ports    map[uint16]PortPolicy
-	Routing  RoutingConfig
+	// Core
+	Memory  MemoryConfig
+	Routing RoutingConfig
+	Ports   Ports
 
-	MQTT     MQTTConfig   // 👈 ADD THIS LINE
+	// Ingest / control plane
+	REST RESTConfig
+	MQTT MQTTConfig
 }

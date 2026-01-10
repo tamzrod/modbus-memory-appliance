@@ -53,3 +53,6 @@ func (s *Stats) Snapshot() StatsSnapshot {
 	out.Ingest.Rejected = atomic.LoadUint64(&s.ingestRejected)
 	return out
 }
+func NewStats() *Stats {
+	return &Stats{}
+}

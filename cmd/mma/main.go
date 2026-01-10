@@ -10,6 +10,7 @@ import (
 	"modbus-memory-appliance/internal/ingest"
 	"modbus-memory-appliance/internal/modbus"
 	"modbus-memory-appliance/internal/mqtt"
+	"modbus-memory-appliance/internal/rest"
 )
 
 func main() {
@@ -39,9 +40,38 @@ func main() {
 
 	// --------------------------------
 	// Create INGEST service
-	// (shared by REST / MQTT in future)
 	// --------------------------------
 	ingestSvc := ingest.New(memories)
+
+	// --------------------------------
+	// MQTT config (SINGLE SOURCE OF TRUTH)
+	// --------------------------------
+	mqttCfg := mqtt.Config{
+		Enabled:  cfg.MQTT.Enabled,
+		Broker:   cfg.MQTT.Broker,
+		ClientID: cfg.MQTT.ClientID,
+		Topic:    cfg.MQTT.Topic,
+		Username: cfg.MQTT.Username,
+		Password: cfg.MQTT.Password,
+	}
+
+	// --------------------------------
+	// REST handlers
+	// --------------------------------
+	handlers := &rest.Handlers{
+		MemoryConfig: &cfg.Memory,
+		Ingest: ingestSvc,
+		Stats:  rest.NewStats(),
+
+		// REST observes MQTT via function (no coupling)
+		MQTTStatus: func() any {
+			return mqtt.GetStatus(mqttCfg)
+		},
+
+		EnableIngest:      true,
+		EnableRead:        true,
+		EnableDiagnostics: true,
+	}
 
 	// --------------------------------
 	// Policy-aware resolver (Modbus only)
@@ -79,10 +109,9 @@ func main() {
 			log.Printf("Starting Modbus TCP listener on %s", addr)
 
 			go func() {
-				err := modbus.Start(addr, func(unitID uint8, fc uint8) *core.Memory {
+				if err := modbus.Start(addr, func(unitID uint8, fc uint8) *core.Memory {
 					return resolver(p, unitID, fc)
-				})
-				if err != nil {
+				}); err != nil {
 					log.Fatalf("Modbus listener on port %d failed: %v", p, err)
 				}
 			}()
@@ -103,16 +132,7 @@ func main() {
 	// ====================================
 	// MQTT INGESTION (NON-FATAL, RETRYING)
 	// ====================================
-	if cfg.MQTT.Enabled {
-		mqttCfg := mqtt.Config{
-			Enabled:  cfg.MQTT.Enabled,
-			Broker:   cfg.MQTT.Broker,
-			ClientID: cfg.MQTT.ClientID,
-			Topic:    cfg.MQTT.Topic,
-			Username: cfg.MQTT.Username,
-			Password: cfg.MQTT.Password,
-		}
-
+	if mqttCfg.Enabled {
 		go func() {
 			for {
 				log.Printf("Starting MQTT subscriber (broker=%s)", mqttCfg.Broker)
@@ -125,10 +145,24 @@ func main() {
 					continue
 				}
 
-				// mqtt.NewSubscriber is expected to BLOCK while connected.
+				// NewSubscriber blocks while connected
 				log.Printf("MQTT subscriber exited, restarting...")
 				time.Sleep(5 * time.Second)
 			}
+		}()
+	}
+
+	// ====================================
+	// REST HTTP SERVER
+	// ====================================
+	if cfg.REST.Enabled {
+		addr := cfg.REST.Address
+
+		log.Printf("Starting REST server on %s", addr)
+
+		go func() {
+			srv := rest.NewServer(addr, handlers, nil)
+			log.Fatal(srv.ListenAndServe())
 		}()
 	}
 

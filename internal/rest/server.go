@@ -32,6 +32,11 @@ func NewServer(
 	mux.HandleFunc("/api/v1/ingest",
 		handlers.HandleIngest)
 
+	mux.HandleFunc(	"/api/v1/diagnostics/mqtt",
+	handlers.HandleDiagnosticsMQTT,
+)
+	
+
 	// ---- middleware ----
 
 	var h http.Handler = mux

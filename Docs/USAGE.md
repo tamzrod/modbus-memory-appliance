@@ -10,7 +10,7 @@ It provides:
 - strict validation
 - non-fatal adapters (MQTT / REST cannot crash Modbus)
 
-This appliance is intentionally **dumb and fast**.
+This appliance is intentionally **dumb and fast**.  
 All interpretation, scaling, and control logic belongs **outside** the appliance.
 
 ---
@@ -26,14 +26,28 @@ All interpretation, scaling, and control logic belongs **outside** the appliance
 
 ## 1. Configuration (`config.yaml`)
 
-`config.yaml` is **runtime-only** and is not committed to Git.
+`config.yaml` is **runtime-only** and is not committed to Git.  
+If the configuration is invalid, **the server will not start**.
 
 ### Minimal Example
 
 ```yaml
 memory:
-  plant_a:
-    size: 1000
+  memories:
+    plant_a:
+      default: true
+      coils:
+        start: 0
+        size: 1024
+      discrete_inputs:
+        start: 0
+        size: 1024
+      holding_registers:
+        start: 0
+        size: 4096
+      input_registers:
+        start: 0
+        size: 4096
 
 routing:
   unit_id_map:
@@ -50,6 +64,10 @@ mqtt:
   broker: tcp://mosquitto:1883
   topic: modbus/ingest
   client_id: mma-plant-a
+
+rest:
+  enabled: true
+  address: ":8080"
 ```
 
 ---
@@ -60,6 +78,7 @@ mqtt:
 - Each register is **uint16**
 - Valid range: `0 – 65535`
 - Out-of-range values are rejected
+- No partial writes (atomic batches only)
 
 ---
 
@@ -119,34 +138,74 @@ mqtt:
 
 ---
 
-## 6. Validation Rules
+## 6. REST API Usage
 
-- Values must be integers
-- Range must be `0–65535`
-- Any invalid value rejects the entire batch
-- No partial writes
+Base URL (default):
+
+```
+http://localhost:8080/api/v1
+```
+
+### 6.1 Health Check
+
+```
+GET /health
+```
+
+Response:
+
+```json
+{ "status": "ok" }
+```
+
+### 6.2 Diagnostics – Memory
+
+```
+GET /diagnostics/memory
+```
+
+### 6.3 Diagnostics – MQTT
+
+```
+GET /diagnostics/mqtt
+```
+
+### 6.4 Memory Read
+
+```
+GET /memory/read
+```
+
+Required query parameters:
+
+- `memory`
+- `area`
+- `address`
+- `count`
+
+Example:
+
+```bash
+curl "http://localhost:8080/api/v1/memory/read?memory=plant_a&area=holding_registers&address=0&count=4"
+```
 
 ---
 
-## 7. Error Logging
+## 7. Validation Rules
 
-Malformed ingest is logged in a Loki-friendly format:
-
-```
-ingest_reject src=192.168.1.45 memory=plant_a area=holding_registers addr=0 index=2 value=999999 reason=uint16_out_of_range
-```
+- Values must be integers
+- Range must be `0–65535`
+- Memory must exist
+- Area must be valid
+- Any invalid value rejects the entire batch
+- No partial writes
 
 ---
 
 ## 8. Docker Usage
 
 ```bash
-docker run -d \
-  --name modbus-memory \
-  --restart unless-stopped \
-  -p 502:502 \
-  -v $(pwd)/config.yaml:/app/config.yaml:ro \
-  rodtamin/modbus-memory-appliance:0.1.1
+docker run -d   --name modbus-memory   --restart unless-stopped   -p 502:502   -p 8080:8080   -v $(pwd)/config.yaml:/app/config.yaml:ro   rodtamin/modbus-memory-appliance:0.1.1
 ```
 
 ---
@@ -156,4 +215,5 @@ docker run -d \
 - Atomic writes
 - Deterministic behavior
 - No silent truncation
+- No implicit defaults
 - Adapter failures never crash Modbus

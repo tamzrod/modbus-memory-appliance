@@ -1,51 +1,50 @@
-# Modbus Memory Appliance – MQTT / REST JSON Ingest Format
+# Modbus Memory Appliance – Ingest JSON Format (MQTT / REST)
 
-This document defines the **canonical JSON ingest format** used by both **MQTT** and **REST** adapters.
+This document defines the **complete, canonical JSON ingest format** used by **all ingest adapters** (MQTT and REST).
 
-The format is **stable, strict, and shared** across all ingest transports.
+The format is **transport-agnostic**, **strict**, and **atomic**.
 
 ---
 
-## Design Rules (Read First)
+## Core Rules (Non‑Negotiable)
 
-- Same JSON schema for MQTT and REST
-- No partial writes
-- Atomic batch semantics
-- No parsing or scaling
-- Values are written as raw `uint16`
+- Same JSON format for MQTT and REST
+- All writes are **atomic** (all‑or‑nothing)
+- No parsing, scaling, or semantics
+- Memory stores **raw values only**
+- Validation happens before any write
 - Any malformed value rejects the entire batch
 
 ---
 
-## Common Fields
+## Common JSON Fields
 
 | Field     | Type    | Required | Description |
 |----------|---------|----------|-------------|
 | memory   | string  | yes      | Target memory name |
-| area     | string  | yes      | Register area |
-| address  | number  | yes      | Zero-based start address |
-| values   | array   | yes      | Array of integer values |
+| area     | string  | yes      | Register / bit area |
+| address  | number  | yes      | Zero‑based start address |
+| values   | array   | yes      | Values to write |
 
 ---
 
 ## Supported Areas
 
-Currently supported:
+| Area Name             | Type     | Value Encoding |
+|----------------------|----------|----------------|
+| holding_registers    | uint16   | 0–65535 |
+| input_registers      | uint16   | 0–65535 |
+| coils                | bool     | 0 / 1 |
+| discrete_inputs      | bool     | 0 / 1 |
 
-```json
-"area": "holding_registers"
-```
-
-Planned (future):
-- `input_registers`
-- `coils`
-- `discrete_inputs`
+> ⚠️ Even bit‑based areas use integers.  
+> `0 = false`, `1 = true`.
 
 ---
 
-## Single Register Write
+# HOLDING REGISTERS
 
-### JSON Payload
+## Single Holding Register Write
 
 ```json
 {
@@ -56,98 +55,157 @@ Planned (future):
 }
 ```
 
-### Result
-
-- Holding Register 0 = `123`
-- Atomic (single value)
-
----
-
-## Batch Register Write (Atomic)
-
-### JSON Payload
+## Batch Holding Register Write
 
 ```json
 {
   "memory": "plant_a",
   "area": "holding_registers",
   "address": 10,
-  "values": [10, 20, 30, 40]
+  "values": [100, 200, 300, 400]
 }
 ```
 
-### Result
-
-| Address | Value |
-|--------|-------|
-| 10     | 10    |
-| 11     | 20    |
-| 12     | 30    |
-| 13     | 40    |
-
-All values are written **together** or **not at all**.
-
 ---
 
-## Validation Rules
+# INPUT REGISTERS
 
-- Values must be integers
-- Range must be `0–65535`
-- Negative values are rejected
-- Overflow values are rejected
-- Any invalid value rejects the entire batch
+> Input registers are writable **only via ingest adapters**.  
+> Modbus clients cannot write input registers.
 
----
-
-## Example: Malformed Payload (Rejected)
-
-### JSON Payload
+## Single Input Register Write
 
 ```json
 {
   "memory": "plant_a",
-  "area": "holding_registers",
+  "area": "input_registers",
   "address": 0,
-  "values": [100, 200, 999999]
+  "values": [555]
 }
 ```
 
-### Result
+## Batch Input Register Write
 
-- ❌ No registers written
-- ❌ No partial state
+```json
+{
+  "memory": "plant_a",
+  "area": "input_registers",
+  "address": 5,
+  "values": [10, 20, 30]
+}
+```
+
+---
+
+# COILS
+
+> Coils represent boolean values.
+
+## Single Coil Write
+
+```json
+{
+  "memory": "plant_a",
+  "area": "coils",
+  "address": 0,
+  "values": [1]
+}
+```
+
+## Batch Coil Write
+
+```json
+{
+  "memory": "plant_a",
+  "area": "coils",
+  "address": 10,
+  "values": [1, 0, 1, 1]
+}
+```
+
+---
+
+# DISCRETE INPUTS
+
+> Discrete inputs are writable **only via ingest adapters**.
+
+## Single Discrete Input Write
+
+```json
+{
+  "memory": "plant_a",
+  "area": "discrete_inputs",
+  "address": 0,
+  "values": [0]
+}
+```
+
+## Batch Discrete Input Write
+
+```json
+{
+  "memory": "plant_a",
+  "area": "discrete_inputs",
+  "address": 20,
+  "values": [1, 1, 0, 0, 1]
+}
+```
+
+---
+
+## Validation Rules (All Areas)
+
+### Register Areas
+- Values must be integers
+- Range: `0–65535`
+
+### Bit Areas
+- Values must be `0` or `1`
+- Any other value is rejected
+
+### Atomicity
+- If **any value is invalid**, the entire batch is rejected
+- No partial writes
+- Memory remains unchanged
+
+---
+
+## Malformed Example (Rejected)
+
+```json
+{
+  "memory": "plant_a",
+  "area": "coils",
+  "address": 0,
+  "values": [1, 0, 2]
+}
+```
+
+Result:
+- ❌ Rejected (invalid bit value `2`)
+- ❌ No state change
 - ✅ Error logged
 
 ---
 
-## Error Logging (Loki-Friendly)
+## Error Logging (Loki‑Friendly)
 
-Malformed ingest is logged as a single structured log line:
+Example log:
 
 ```
-ingest_reject src=192.168.1.45 memory=plant_a area=holding_registers addr=0 index=2 value=999999 reason=uint16_out_of_range
+ingest_reject src=192.168.1.45 memory=plant_a area=coils addr=0 index=2 value=2 reason=invalid_bit
 ```
 
-Fields:
-- `src` – source IP or client identifier
-- `index` – index of invalid value in `values[]`
+Logged fields:
+- `src` – source IP or client ID
+- `area` – target area
+- `index` – index in values array
 - `value` – offending value
-- `reason` – rejection reason
+- `reason` – validation failure
 
 ---
 
-## MQTT Usage
-
-### Topic
-
-Defined in `config.yaml`:
-
-```yaml
-mqtt:
-  topic: modbus/ingest
-```
-
-### Publish Example
+## MQTT Example
 
 ```bash
 mosquitto_pub \
@@ -156,61 +214,42 @@ mosquitto_pub \
     "memory":"plant_a",
     "area":"holding_registers",
     "address":0,
-    "values":[1,2,3,4]
+    "values":[10,20,30]
   }'
 ```
 
 ---
 
-## REST Usage
+## REST Example
 
-### Endpoint (example)
-
-```
+```http
 POST /api/ingest
-```
+Content-Type: application/json
 
-### Body
-
-```json
 {
-  "memory": "plant_a",
-  "area": "holding_registers",
-  "address": 20,
-  "values": [500, 600]
+  "memory":"plant_a",
+  "area":"input_registers",
+  "address":5,
+  "values":[111,222]
 }
 ```
-
-REST uses **the exact same validation and semantics** as MQTT.
-
----
-
-## What This Format Is NOT
-
-- ❌ Not a PLC language
-- ❌ Not semantic data
-- ❌ Not scaled values
-- ❌ Not floats
-
-It is **raw register memory ingestion**.
 
 ---
 
 ## Compatibility Guarantee
 
-This JSON schema is considered **stable**.
+This ingest format is **stable**.
 
-Future extensions will be:
+Any future extensions will be:
 - additive
 - backward compatible
 - explicitly documented
 
 ---
 
-## Recommended File Placement
+## Recommended Location
 
 ```
 Docs/
   └── INGEST_JSON.md
 ```
-

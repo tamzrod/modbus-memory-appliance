@@ -1,0 +1,25 @@
+# Runtime config (DO NOT COMMIT)
+config.yaml
+
+# Build artifacts / leftovers
+Removed
+a6bde775dba7
+
+# Binaries
+bin/
+dist/
+app/mma
+
+# Logs
+*.log
+
+# Node / UI
+node_modules/
+
+# Editor / OS noise
+.vscode/
+.idea/
+.DS_Store
+
+# Backups
+*.ppcbackup

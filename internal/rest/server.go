@@ -29,26 +29,25 @@ func NewServer(
 	mux.HandleFunc("/api/v1/memory/read",
 		handlers.HandleMemoryRead)
 
-	mux.HandleFunc("/api/v1/ingest",
-		handlers.HandleIngest)
-
-	mux.HandleFunc(	"/api/v1/diagnostics/mqtt",
-	handlers.HandleDiagnosticsMQTT,
-)
-	
-
-	// ---- middleware ----
-
-	var h http.Handler = mux
+	// 🔒 PROTECTED ENDPOINT (Bearer required)
 	if authMiddleware != nil {
-		h = authMiddleware(h)
+		mux.Handle("/api/v1/ingest",
+			authMiddleware(http.HandlerFunc(handlers.HandleIngest)),
+		)
+	} else {
+		// fallback: no auth middleware
+		mux.HandleFunc("/api/v1/ingest",
+			handlers.HandleIngest)
 	}
+
+	mux.HandleFunc("/api/v1/diagnostics/mqtt",
+		handlers.HandleDiagnosticsMQTT)
 
 	// ---- server ----
 
 	return &http.Server{
 		Addr:         addr,
-		Handler:      h,
+		Handler:      mux,
 		ReadTimeout:  10 * time.Second,
 		WriteTimeout: 10 * time.Second,
 		IdleTimeout:  30 * time.Second,

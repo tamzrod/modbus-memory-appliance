@@ -7,7 +7,7 @@ import (
 
 type TokenSet struct {
 	enabled bool
-	tokens  map[string]struct{} // value -> present
+	tokens  map[string]struct{} // token -> present
 }
 
 func NewTokenSet(enabled bool, tokenValues []string) *TokenSet {
@@ -18,7 +18,10 @@ func NewTokenSet(enabled bool, tokenValues []string) *TokenSet {
 		}
 		m[t] = struct{}{}
 	}
-	return &TokenSet{enabled: enabled, tokens: m}
+	return &TokenSet{
+		enabled: enabled,
+		tokens:  m,
+	}
 }
 
 func (ts *TokenSet) Require(next http.Handler, stats *Stats) http.Handler {
@@ -27,41 +30,34 @@ func (ts *TokenSet) Require(next http.Handler, stats *Stats) http.Handler {
 	}
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// /health is always public
+		// health endpoint is always public
 		if r.URL.Path == "/api/v1/health" {
 			next.ServeHTTP(w, r)
 			return
 		}
 
+		// ---- Authorization header check ----
 		auth := r.Header.Get("Authorization")
 		if !strings.HasPrefix(auth, "Bearer ") {
 			stats.IncUnauthorized()
-			writeJSON(w, http.StatusUnauthorized, map[string]any{
-				"status": "unauthorized",
-				"error":  "invalid or missing bearer token",
-			})
+			w.WriteHeader(http.StatusUnauthorized)
 			return
 		}
 
 		token := strings.TrimSpace(strings.TrimPrefix(auth, "Bearer "))
 		if token == "" {
 			stats.IncUnauthorized()
-			writeJSON(w, http.StatusUnauthorized, map[string]any{
-				"status": "unauthorized",
-				"error":  "invalid or missing bearer token",
-			})
+			w.WriteHeader(http.StatusUnauthorized)
 			return
 		}
 
 		if _, ok := ts.tokens[token]; !ok {
 			stats.IncUnauthorized()
-			writeJSON(w, http.StatusUnauthorized, map[string]any{
-				"status": "unauthorized",
-				"error":  "invalid or missing bearer token",
-			})
+			w.WriteHeader(http.StatusUnauthorized)
 			return
 		}
 
+		// ---- authorized ----
 		next.ServeHTTP(w, r)
 	})
 }

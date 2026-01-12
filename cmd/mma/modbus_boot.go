@@ -8,7 +8,10 @@ import (
 	"modbus-memory-appliance/internal/core"
 	"modbus-memory-appliance/internal/modbus"
 )
+
 func startModbus(cfg *config.AppConfig, memories map[string]*core.Memory) {
+
+	// Resolver: port + unitID + function code → memory
 	resolver := func(port uint16, unitID uint8, fc uint8) *core.Memory {
 		memID, ok := cfg.Routing.UnitIDMap[unitID]
 		if !ok {
@@ -27,19 +30,31 @@ func startModbus(cfg *config.AppConfig, memories map[string]*core.Memory) {
 		return memories[memID]
 	}
 
-	if len(cfg.Ports) > 0 {
-		for port := range cfg.Ports {
-			p := port
-			addr := fmt.Sprintf(":%d", p)
+	if len(cfg.Ports) == 0 {
+		return
+	}
 
-			go func() {
-				log.Printf("Starting Modbus TCP listener on %s", addr)
-				if err := modbus.Start(addr, func(unitID uint8, fc uint8) *core.Memory {
+	// Start one Modbus TCP listener per configured port
+	for port, policy := range cfg.Ports {
+		p := port
+		pol := policy
+		addr := fmt.Sprintf(":%d", p)
+
+		go func() {
+			log.Printf("Starting Modbus TCP listener on %s", addr)
+
+			err := modbus.Start(
+				addr,
+				func(unitID uint8, fc uint8) *core.Memory {
 					return resolver(p, unitID, fc)
-				}); err != nil {
-					log.Fatal(err)
-				}
-			}()
-		}
+				},
+				pol.IPFilter.Allow, // ✅ CONFIG-DRIVEN
+				pol.IPFilter.Deny,  // ✅ CONFIG-DRIVEN
+			)
+
+			if err != nil {
+				log.Fatal(err)
+			}
+		}()
 	}
 }

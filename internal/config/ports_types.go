@@ -10,6 +10,7 @@ type PortPolicy struct {
 	Memories      MemorySelector    `yaml:"memories"`
 	Access        AccessMode        `yaml:"access"`
 	FunctionCodes *FunctionCodeACL  `yaml:"function_codes,omitempty"`
+	IPFilter      IPFilterConfig    `yaml:"ip_filter,omitempty"`
 }
 
 // AccessMode defines read/write capability.

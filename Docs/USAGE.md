@@ -105,30 +105,71 @@ If logic or meaning is required, it belongs in **Node‑RED, PLCs, PPC logic, or
 ### Minimal Example
 
 ```yaml
+mqtt:
+  enabled: false
+  broker: "localhost:1883"
+  client_id: "mma-ingest"
+  topic: "mqtt/ingest"
+  username: ""
+  password: ""
+
+# =========================
+# Memory Definitions
+# =========================
 memory:
   memories:
     plant_a:
       default: true
-      coils: { start: 0, size: 1024 }
-      discrete_inputs: { start: 0, size: 1024 }
-      holding_registers: { start: 0, size: 4096 }
-      input_registers: { start: 0, size: 4096 }
+      coils:
+        start: 0
+        size: 1024
+      discrete_inputs:
+        start: 0
+        size: 1024
+      holding_registers:
+        start: 0
+        size: 4096
+      input_registers:
+        start: 0
+        size: 4096
 
+   
+
+# =========================
+# Unit ID → Memory Routing
+# =========================
 routing:
   unit_id_map:
     1: plant_a
+    
 
+# =========================
+# Port-Level Access Policy
+# =========================
 ports:
+
+  # Main control port (full access)
   502:
-    allow_unit_ids: [1]
-    allow_memories: [plant_a]
-    allow_function_codes: [3, 4, 6, 16]
-
+    unit_ids: all
+    memories: all
+    access: read-write
 rest:
-  enable: true
+  enabled: true
+  address: ":8080"
 
-mqtt:
-  enable: true
+  auth:
+    enabled: true
+    type: bearer
+
+    bearer:
+      tokens:
+        - name: admin
+          token: "CHANGE_ME_LONG_RANDOM"
+
+        - name: device_ingest
+          token: "INGEST_ONLY_TOKEN"
+
+
 ```
 
 ---

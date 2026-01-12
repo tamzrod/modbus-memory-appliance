@@ -1,33 +1,106 @@
-# Modbus Memory Appliance – Usage Guide
+# Modbus Memory Appliance (MMA) — Usage Guide
 
-## Purpose
+**Version:** Architecture‑Aligned (2026)
 
-The **Modbus Memory Appliance (MMA)** is a deterministic Modbus TCP memory server with optional MQTT and REST ingestion.
+---
+
+## 1. Purpose
+
+The **Modbus Memory Appliance (MMA)** is a deterministic, in‑memory Modbus TCP server with optional REST and MQTT ingestion adapters.
 
 It provides:
-- raw **uint16 register storage**
-- **atomic batch writes**
-- strict validation
-- non-fatal adapters (MQTT / REST cannot crash Modbus)
 
-This appliance is intentionally **dumb and fast**.  
-All interpretation, scaling, and control logic belongs **outside** the appliance.
+* Raw **bool** (0/1) and **uint16** memory storage
+* **Atomic reads and writes** (all‑or‑nothing)
+* Strict bounds and validation
+* Transport isolation (REST/MQTT cannot crash Modbus)
 
----
-
-## High-Level Flow
-
-```
-[ MQTT / REST ]  ──▶  [ INGEST + VALIDATION ]  ──▶  [ MEMORY ]  ──▶  [ Modbus TCP ]
-                                            (uint16 only)
-```
+This appliance is intentionally **dumb and fast**.
+All interpretation, scaling, units, floats, and control logic live **outside** MMA.
 
 ---
 
-## 1. Configuration (`config.yaml`)
+## 2. What MMA Is Not
 
-`config.yaml` is **runtime-only** and is not committed to Git.  
-If the configuration is invalid, **the server will not start**.
+MMA is **not**:
+
+* A PLC
+* A SCADA system
+* A protocol translator
+* A rules engine
+* A historian or database
+* A persistence layer
+
+If logic or meaning is required, it belongs in **Node‑RED, PLCs, PPC logic, or external services**.
+
+---
+
+## 3. High‑Level Architecture
+
+```
+           (device ingestion)
+        ┌───────────┐
+        │ MQTT /    │
+        │ REST      │
+        └─────┬─────┘
+              │
+              ▼
+     ┌───────────────────┐
+     │  IngestService     │
+     │  (DI / IR only)    │
+     └─────┬─────────────┘
+           │
+           ▼
+     ┌───────────────────┐
+     │  Memory Appliance  │
+     │  (raw bool/uint16) │
+     └─────┬─────────────┘
+           │
+           ▼
+     ┌───────────────────┐
+     │   Modbus TCP       │
+     │ (client control)  │
+     └───────────────────┘
+```
+
+**Separation of concerns (locked):**
+
+* **Modbus TCP** → client control plane
+* **REST / MQTT** → device ingestion plane
+
+---
+
+## 4. Memory Model (Locked)
+
+* Internal addressing is **zero‑based**
+* Memory areas:
+
+  * Coils → `bool`
+  * Discrete Inputs (DI) → `bool`
+  * Holding Registers (HR) → `uint16`
+  * Input Registers (IR) → `uint16`
+* Valid register range: `0–65535`
+* No floats, no scaling, no semantics
+* Memory layout defined **only at startup**
+
+### Atomicity Guarantees
+
+* Single write → atomic
+* Batch write → atomic
+* No partial or mixed state is observable
+* Invalid batch → entire batch rejected
+
+---
+
+## 5. Configuration (`config.yaml`)
+
+### Rules
+
+* Loaded **once at startup**
+* Stored in RAM
+* Immutable at runtime
+* Invalid config → **recovery mode**
+* Restart required to apply changes
 
 ### Minimal Example
 
@@ -36,18 +109,10 @@ memory:
   memories:
     plant_a:
       default: true
-      coils:
-        start: 0
-        size: 1024
-      discrete_inputs:
-        start: 0
-        size: 1024
-      holding_registers:
-        start: 0
-        size: 4096
-      input_registers:
-        start: 0
-        size: 4096
+      coils: { start: 0, size: 1024 }
+      discrete_inputs: { start: 0, size: 1024 }
+      holding_registers: { start: 0, size: 4096 }
+      input_registers: { start: 0, size: 4096 }
 
 routing:
   unit_id_map:
@@ -59,37 +124,32 @@ ports:
     allow_memories: [plant_a]
     allow_function_codes: [3, 4, 6, 16]
 
-mqtt:
-  enabled: true
-  broker: tcp://mosquitto:1883
-  topic: modbus/ingest
-  client_id: mma-plant-a
-
 rest:
-  enabled: true
-  address: ":8080"
+  enable: true
+
+mqtt:
+  enable: true
 ```
 
 ---
 
-## 2. Memory Model
-
-- Memory is **zero-based**
-- Each register is **uint16**
-- Valid range: `0 – 65535`
-- Out-of-range values are rejected
-- No partial writes (atomic batches only)
-
----
-
-## 3. Modbus TCP Usage
+## 6. Modbus TCP Usage (Client Plane)
 
 ### Supported Function Codes
 
-- FC 3 – Read Holding Registers
-- FC 4 – Read Input Registers
-- FC 6 – Write Single Register
-- FC 16 – Write Multiple Registers
+* FC 3 — Read Holding Registers
+* FC 4 — Read Input Registers
+* FC 6 — Write Single Holding Register
+* FC 16 — Write Multiple Holding Registers
+
+### Modbus Rules
+
+* Modbus **cannot write**:
+
+  * Discrete Inputs
+  * Input Registers
+* All writes are bounds‑checked and atomic
+* Port policies strictly enforced
 
 ### Example (modpoll)
 
@@ -99,121 +159,158 @@ modpoll -m tcp -p 502 -a 1 -r 0 -c 10 localhost
 
 ---
 
-## 4. MQTT Ingest (Primary Write Path)
+## 7. Unified Ingestion (REST & MQTT)
 
-### Topic
+REST and MQTT share a **single canonical ingest model** and the same internal `IngestService`.
 
-Defined in `config.yaml`:
+### Ingestion Scope (Locked)
 
-```yaml
-mqtt:
-  topic: modbus/ingest
-```
+* Allowed areas:
+
+  * `discrete_inputs`
+  * `input_registers`
+* Disallowed:
+
+  * `coils`
+  * `holding_registers`
+
+No Modbus function codes are simulated.
 
 ---
 
-## 5. MQTT JSON Payload Format (Canonical)
+## 8. Canonical Ingest Payload (JSON)
 
-### Single Register Write
+### Boolean Ingest (DI)
+
+Boolean values are encoded as **0 or 1** (not `true/false`).
 
 ```json
 {
   "memory": "plant_a",
-  "area": "holding_registers",
+  "area": "discrete_inputs",
   "address": 0,
-  "values": [123]
+  "bools": [1, 0, 1]
 }
 ```
 
-### Batch Write (Atomic)
+### Register Ingest (IR — Atomic)
 
 ```json
 {
   "memory": "plant_a",
-  "area": "holding_registers",
-  "address": 0,
-  "values": [10, 20, 30, 40]
+  "area": "input_registers",
+  "address": 10,
+  "values": [1234, 5678, 9012]
 }
 ```
 
+### Validation Rules
+
+* Entire payload validated before write
+* Any invalid value → no write
+* Bounds enforced
+* Atomic commit
+
 ---
 
-## 6. REST API Usage
+## 9. REST API
 
-Base URL (default):
+### Base URL
 
 ```
 http://localhost:8080/api/v1
 ```
 
-### 6.1 Health Check
+### Core Endpoints
 
-```
-GET /health
-```
+| Method | Endpoint              | Purpose               |
+| ------ | --------------------- | --------------------- |
+| GET    | `/health`             | Liveness check        |
+| GET    | `/diagnostics/memory` | Memory layout & stats |
+| GET    | `/diagnostics/mqtt`   | MQTT status           |
+| GET    | `/diagnostics/stats`  | Counters              |
+| POST   | `/ingest`             | Canonical ingest      |
+| GET    | `/memory/read`        | Direct memory read    |
 
-Response:
+---
 
-```json
-{ "status": "ok" }
-```
+## 10. Recovery Mode
 
-### 6.2 Diagnostics – Memory
+If configuration validation fails:
 
-```
-GET /diagnostics/memory
-```
+* Modbus TCP → disabled
+* MQTT → disabled
+* REST → enabled
+* Memory not exposed
+* Config can be inspected and repaired
+* Restart required after repair
 
-### 6.3 Diagnostics – MQTT
+---
 
-```
-GET /diagnostics/mqtt
-```
-
-### 6.4 Memory Read
-
-```
-GET /memory/read
-```
-
-Required query parameters:
-
-- `memory`
-- `area`
-- `address`
-- `count`
-
-Example:
+## 11. Docker Usage
 
 ```bash
-curl "http://localhost:8080/api/v1/memory/read?memory=plant_a&area=holding_registers&address=0&count=4"
+docker run -d \
+  --name mma \
+  --restart unless-stopped \
+  -p 502:502 \
+  -p 8080:8080 \
+  -v $(pwd)/config.yaml:/app/config.yaml:ro \
+  rodtamin/modbus-memory-appliance:latest
 ```
 
 ---
 
-## 7. Validation Rules
+## 12. Windows — Run as a Service
 
-- Values must be integers
-- Range must be `0–65535`
-- Memory must exist
-- Area must be valid
-- Any invalid value rejects the entire batch
-- No partial writes
+MMA can run natively on **Windows** as a **Windows Service**.
 
----
-
-## 8. Docker Usage
+### Build
 
 ```bash
-docker run -d   --name modbus-memory   --restart unless-stopped   -p 502:502   -p 8080:8080   -v $(pwd)/config.yaml:/app/config.yaml:ro   rodtamin/modbus-memory-appliance:0.1.1
+GOOS=windows GOARCH=amd64 go build -o mma.exe ./cmd/mma
+```
+
+### Install Service (Administrator)
+
+```powershell
+mma.exe install
+```
+
+### Start / Stop
+
+```powershell
+mma.exe start
+mma.exe stop
+```
+
+### Uninstall
+
+```powershell
+mma.exe uninstall
+```
+
+### Recommended Layout
+
+```
+C:\mma\
+ ├─ mma.exe
+ └─ config.yaml
 ```
 
 ---
 
-## Design Guarantees
+## 13. Design Guarantees (Non‑Negotiable)
 
-- Atomic writes
-- Deterministic behavior
-- No silent truncation
-- No implicit defaults
-- Adapter failures never crash Modbus
+* Deterministic behavior
+* Atomic writes
+* Strict bounds enforcement
+* No silent truncation
+* No runtime memory mutation
+* Adapter failures never affect Modbus core
+
+---
+
+## Final Mental Model
+
+> **MMA is a dumb, fast, in‑memory Modbus server where all intelligence lives outside.**

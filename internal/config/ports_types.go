@@ -11,6 +11,7 @@ type PortPolicy struct {
 	Access        AccessMode        `yaml:"access"`
 	FunctionCodes *FunctionCodeACL  `yaml:"function_codes,omitempty"`
 	IPFilter      IPFilterConfig    `yaml:"ip_filter,omitempty"`
+	MaxConnections int               `yaml:"max_connections,omitempty"`
 }
 
 // AccessMode defines read/write capability.

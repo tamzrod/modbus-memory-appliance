@@ -50,6 +50,7 @@ func startModbus(cfg *config.AppConfig, memories map[string]*core.Memory) {
 				},
 				pol.IPFilter.Allow, // ✅ CONFIG-DRIVEN
 				pol.IPFilter.Deny,  // ✅ CONFIG-DRIVEN
+				pol.MaxConnections, // 🔒 per-port hard cap
 			)
 
 			if err != nil {

@@ -7,15 +7,16 @@ import (
 	"modbus-memory-appliance/internal/modbus/ipfilter"
 )
 
-// Start starts a Modbus TCP listener with optional IP filtering
+const defaultMaxConnections = 32
+
 func Start(
 	addr string,
 	resolve MemoryResolver,
 	allowIPs []string,
 	denyIPs []string,
+	maxConns int,
 ) error {
 
-	// 1️⃣ Compile IP filter ONCE at startup
 	filter, err := ipfilter.Compile(allowIPs, denyIPs)
 	if err != nil {
 		return err
@@ -26,7 +27,13 @@ func Start(
 		return err
 	}
 
-	log.Println("Modbus TCP listening on", addr)
+	if maxConns <= 0 {
+		maxConns = defaultMaxConnections
+	}
+
+	log.Println("Modbus TCP listening on", addr, "max_connections =", maxConns)
+
+	sem := make(chan struct{}, maxConns)
 
 	for {
 		conn, err := ln.Accept()
@@ -34,7 +41,6 @@ func Start(
 			continue
 		}
 
-		// 2️⃣ Enforce IP filter IMMEDIATELY after Accept
 		if filter.Enabled() {
 			host, _, err := net.SplitHostPort(conn.RemoteAddr().String())
 			if err != nil {
@@ -49,6 +55,16 @@ func Start(
 			}
 		}
 
-		go handleConn(conn, resolve)
+		select {
+		case sem <- struct{}{}:
+		default:
+			conn.Close()
+			continue
+		}
+
+		go func() {
+			defer func() { <-sem }()
+			handleConn(conn, resolve)
+		}()
 	}
 }

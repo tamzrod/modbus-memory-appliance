@@ -9,6 +9,8 @@ a6bde775dba7
 bin/
 dist/
 app/mma
+*.exe
+
 
 # Logs
 *.log

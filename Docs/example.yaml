@@ -1,0 +1,69 @@
+mqtt:
+  enabled: false
+  broker: "localhost:1883"
+  client_id: "mma-ingest"
+  topic: "mqtt/ingest"
+  username: ""
+  password: ""
+
+# =========================
+# Memory Definitions
+# =========================
+memory:
+  memories:
+    plant_a:
+      default: true
+      coils:
+        start: 0
+        size: 1024
+      discrete_inputs:
+        start: 0
+        size: 1024
+      holding_registers:
+        start: 0
+        size: 4096
+      input_registers:
+        start: 0
+        size: 4096
+
+   
+
+# =========================
+# Unit ID → Memory Routing
+# =========================
+routing:
+  unit_id_map:
+    1: plant_a
+    
+
+# =========================
+# Port-Level Access Policy
+# =========================
+ports:
+  502:
+    unit_ids: all
+    memories: all
+    access: read-write
+    max_connections: 32
+ip_filter:
+  allow:
+    - "127.0.0.1"
+    - "::1"
+    - "::ffff:127.0.0.1/128"
+
+rest:
+  enabled: true
+  address: ":8080"
+
+  auth:
+    enabled: true
+    type: bearer
+
+    bearer:
+      tokens:
+        - name: admin
+          token: "CHANGE_ME_LONG_RANDOM"
+
+        - name: device_ingest
+          token: "INGEST_ONLY_TOKEN"
+

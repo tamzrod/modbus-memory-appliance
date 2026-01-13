@@ -136,8 +136,12 @@ Authorization: Bearer <TOKEN>
 #### Payload Rules
 - **For `discrete_inputs`:** Use `bools` array only, leave `values` empty/omitted
 - **For `input_registers`:** Use `values` array only, leave `bools` empty/omitted
-- **Read-only areas rejected:** `coils` and `holding_registers` cannot be written via REST ingest
-  - Use Modbus TCP or MQTT for these areas
+- **Writable areas via REST/MQTT ingest:**
+  - ✅ `discrete_inputs` - sensor data (read-only from Modbus perspective)
+  - ✅ `input_registers` - sensor data (read-only from Modbus perspective)
+- **Not writable via REST/MQTT (use Modbus TCP instead):**
+  - ❌ `coils` - output/control (written by Modbus master)
+  - ❌ `holding_registers` - configuration/output (written by Modbus master)
 
 #### Success Response (200 OK)
 ```json

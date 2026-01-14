@@ -2,13 +2,16 @@
 
 ## Purpose
 
-**State Sealing** is a lifecycle safety feature of the Modbus Memory Appliance (MMA).
+**State Sealing** is a lifecycle safety mechanism of the **Modbus Memory Appliance (MMA)**.
 
-It prevents Modbus clients from accessing **uninitialized or unsafe memory** during startup.
-This avoids unintended plant behavior such as controllers interpreting default values
-(e.g. zero setpoints) as valid commands.
+Its purpose is to prevent Modbus clients from interacting with **uninitialized or unsafe memory** during startup, while still allowing external systems (REST / MQTT) to initialize state.
 
-State Sealing is designed for **industrial safety**, not convenience.
+This avoids unintended plant behavior such as:
+- Controllers acting on default values
+- Zero setpoints being interpreted as valid commands
+- Control loops starting before state restoration is complete
+
+State Sealing exists for **industrial safety**, not convenience.
 
 ---
 
@@ -18,14 +21,15 @@ State Sealing is designed for **industrial safety**, not convenience.
 
 This is intentional.
 
-When disabled:
-- MMA starts directly in **RUN state**
-- Modbus reads and writes work immediately
-- Behavior matches previous MMA versions
+When State Sealing is disabled:
+
+- MMA starts immediately in **RUN state**
+- Modbus reads and writes are fully enabled
+- REST and MQTT ingestion behave normally
+- Behavior is identical to previous MMA versions
 - No additional configuration is required
 
-End users must **explicitly enable State Sealing** and understand its effects.
-This avoids confusion and prevents the system from appearing “broken” by default.
+Users must **explicitly enable State Sealing** and understand its impact.
 
 ---
 
@@ -34,8 +38,9 @@ This avoids confusion and prevents the system from appearing “broken” by def
 State Sealing is scoped **per memory instance**.
 
 - Each memory has its own lifecycle state
-- Modbus ports enforce the state of the memory they are bound to
-- Transports do not own lifecycle state
+- Modbus access is enforced per memory
+- REST and MQTT do **not** own lifecycle state
+- Lifecycle state is not global
 
 State Sealing is a **memory-level lifecycle mechanism**, not a Modbus feature.
 
@@ -43,55 +48,101 @@ State Sealing is a **memory-level lifecycle mechanism**, not a Modbus feature.
 
 ## Lifecycle States
 
-Each memory exists in exactly one of the following states.
-
 ### 1. Pre-Run (Unsealed)
 
-The memory exists but is **not operationally valid**.
+- Modbus access: ❌ blocked  
+- REST / MQTT ingestion: ✅ allowed  
 
-This state is used to:
-- restore critical state
-- initialize control values
-- synchronize external systems
-- prevent unsafe plant execution
-
-> This state only exists when State Sealing is enabled.
-
----
+Used for:
+- Restoring retained values
+- Initializing control parameters
+- Synchronizing external systems
 
 ### 2. RUN (Sealed)
 
-The memory is operational and may safely participate in control loops.
-
-- This is the default state
-- This is the only state when State Sealing is disabled
+- Modbus access: ✅ enabled  
+- Normal operational state  
 
 ---
 
-## State Transition (State Sealing)
+## State Transition (Sealing)
 
-**State Sealing** is the act of transitioning a memory from Pre-Run to RUN.
+Transition from **Pre-Run → RUN**:
 
-Properties:
 - One-time only
 - Explicit
 - Memory-scoped
 - Irreversible until restart
 
-Once sealed, restore authority is permanently revoked.
+---
+
+## Gate Mechanism
+
+- Single discrete input bit
+- Writing `1` seals the memory
+- Evaluated via REST / MQTT
+- Modbus cannot open the gate
 
 ---
 
-## Configuration
-
-State Sealing is **opt-in per memory**.
-
-### Disabled (default)
+## Configuration Example
 
 ```yaml
-memories:
-  main:
-    coils: 128
-    holding_registers: 256
-    discrete_inputs: 128
-    input_registers: 128
+memory:
+  memories:
+    plant_a:
+      default: true
+      coils:
+        start: 0
+        size: 1024
+      discrete_inputs:
+        start: 0
+        size: 1024
+      holding_registers:
+        start: 0
+        size: 4096
+      input_registers:
+        start: 0
+        size: 4096
+
+  state_sealing:
+    enable: true
+    gate:
+      area: discrete_inputs
+      address: 127
+```
+
+---
+
+## Opening the Gate (REST)
+
+```http
+POST /api/v1/ingest
+Authorization: Bearer INGEST_ONLY_TOKEN
+Content-Type: application/json
+
+{
+  "memory": "plant_a",
+  "area": "discrete_inputs",
+  "address": 127,
+  "bools": [1]
+}
+```
+
+Expected log:
+
+```
+[STATE] memory transitioned to RUN via gate @ discrete_inputs[127]
+```
+
+---
+
+## Summary
+
+- Disabled by default
+- Per-memory lifecycle
+- REST / MQTT initialize state
+- Discrete-input gate seals memory
+- Modbus enabled only after sealing
+
+Deterministic, explicit, and safe startup behavior.

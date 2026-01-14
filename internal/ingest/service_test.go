@@ -6,6 +6,8 @@ import (
 	"modbus-memory-appliance/internal/core"
 )
 
+// newTestService creates a Service with a memory in PRE-RUN state
+// so ingest restore (including coils & holding registers) is allowed.
 func newTestService() *Service {
 	mem := core.NewMemory(
 		10, // coils
@@ -13,6 +15,9 @@ func newTestService() *Service {
 		10, // holding registers
 		10, // input registers
 	)
+
+	// 🔑 Force PRE-RUN for tests that expect ingest to succeed
+	mem.SetStateSealing(true, 999) // gate address unused in tests
 
 	return New(map[string]*core.Memory{
 		"test": mem,
@@ -183,6 +188,7 @@ func TestIngest_Guards(t *testing.T) {
 		})
 	}
 }
+
 func TestIngest_CoilsAndHoldingRegisters(t *testing.T) {
 	svc := newTestService()
 

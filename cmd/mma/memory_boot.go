@@ -1,3 +1,4 @@
+// cmd/mma/memory_boot.go
 package main
 
 import (

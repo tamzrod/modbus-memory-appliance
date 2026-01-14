@@ -1,3 +1,4 @@
+// internal/config/factory.go
 package config
 
 import (
@@ -9,10 +10,6 @@ import (
 // BuildMemories creates runtime core.Memory instances
 // from a validated MemoryConfig.
 func BuildMemories(cfg *MemoryConfig) (map[string]*core.Memory, error) {
-	if err := cfg.Validate(); err != nil {
-		return nil, err
-	}
-
 	memories := make(map[string]*core.Memory)
 
 	for memID, block := range cfg.Memories {
@@ -26,6 +23,28 @@ func BuildMemories(cfg *MemoryConfig) (map[string]*core.Memory, error) {
 		if mem == nil {
 			return nil, fmt.Errorf(
 				"failed to create memory '%s'",
+				memID,
+			)
+		}
+
+		// =========================
+		// Apply State Sealing (optional, per memory)
+		// =========================
+		if block.StateSealing != nil && block.StateSealing.Enable {
+			mem.SetStateSealing(
+				true,
+				block.StateSealing.Gate.Address,
+			)
+
+			fmt.Printf(
+				"[BOOT] memory=%s state_sealing=enabled prerun=%v gate=%d\n",
+				memID,
+				mem.IsPreRun(),
+				mem.GateAddress(),
+			)
+		} else {
+			fmt.Printf(
+				"[BOOT] memory=%s state_sealing=disabled\n",
 				memID,
 			)
 		}

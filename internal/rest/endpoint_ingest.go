@@ -65,7 +65,7 @@ func (h *Handlers) HandleIngest(w http.ResponseWriter, r *http.Request) {
 	}
 
 	cmd := ingest.Command{
-		Memory:  "default",
+		Memory:  req.Memory,
 		Area:    ingest.Area(req.Area), // simple cast, no enums
 		Address: req.Address,
 		Bools:   req.Bools,

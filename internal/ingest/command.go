@@ -13,11 +13,10 @@ const (
 // Command is the single canonical ingestion command.
 // Used by REST, MQTT, and any future transport.
 type Command struct {
-	Memory  string
-	Area    Area
-	Address uint16
-
-	// Exactly ONE of these must be set
-	Bools  []int    // numeric booleans: 0 or 1
-	Values []uint16 // input registers
+    Memory  string   `json:"memory"`
+    Area    Area     `json:"area"`
+    Address uint16   `json:"address"`
+    Bools   []int    `json:"bools,omitempty"`
+    Values  []uint16 `json:"values,omitempty"`
 }
+

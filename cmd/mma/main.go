@@ -1,6 +1,6 @@
 package main
 
 func main() {
-	handleCLI() // 👈 THIS WAS MISSING
+	handleCLI() 
 	appMain()
 }

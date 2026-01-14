@@ -13,20 +13,29 @@ memory:
   memories:
     plant_a:
       default: true
+
       coils:
         start: 0
         size: 1024
+
       discrete_inputs:
         start: 0
         size: 1024
+
       holding_registers:
         start: 0
         size: 4096
+
       input_registers:
         start: 0
         size: 4096
 
-   
+  state_sealing:
+    enable: true
+    gate:
+      area: discrete_inputs
+      address: 127
+
 
 # =========================
 # Unit ID → Memory Routing
@@ -34,7 +43,6 @@ memory:
 routing:
   unit_id_map:
     1: plant_a
-    
 
 # =========================
 # Port-Level Access Policy
@@ -45,6 +53,7 @@ ports:
     memories: all
     access: read-write
     max_connections: 32
+
 ip_filter:
   allow:
     - "127.0.0.1"
@@ -66,4 +75,3 @@ rest:
 
         - name: device_ingest
           token: "INGEST_ONLY_TOKEN"
-

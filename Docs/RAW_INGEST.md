@@ -147,14 +147,6 @@ Mismatch → reject.
 
 ---
 
-### 6.5 CRC
-
-- CRC32 (IEEE)
-- Covers everything except CRC field
-- CRC failure → reject
-
----
-
 ## 7. Write Semantics
 
 - All‑or‑nothing writes
@@ -218,4 +210,5 @@ Nothing else.
 ---
 
 **End of Raw Ingest Rules**
+
 

@@ -20,11 +20,12 @@ Everything else — scaling, semantics, control logic, visualization, AI — liv
 
 MMA provides:
 
-* Modbus TCP server
+* Modbus TCP server (control plane)
 * Deterministic in-memory Modbus data model
 * Atomic memory updates
 * Strict validation
-* Transport adapters (Modbus / REST / MQTT)
+* **Multiple ingest paths (Raw / REST / MQTT)**
+* Transport adapters (Modbus / REST / MQTT / Raw TCP)
 * Config-driven access control and safety boundaries
 * High-throughput, low-overhead operation
 
@@ -79,7 +80,7 @@ Determinism is a feature, not an optimization.
 
 ---
 
-### 3. Atomic Writes
+### 3. Atomic Writes (All Paths)
 
 All writes are **all-or-nothing**:
 
@@ -93,6 +94,7 @@ This applies equally to:
 * Modbus writes
 * REST ingest
 * MQTT ingest
+* **Raw Ingest**
 
 ---
 
@@ -100,9 +102,10 @@ This applies equally to:
 
 Protocols are adapters, not dependencies:
 
-* Modbus TCP
-* REST
-* MQTT
+* Modbus TCP (control plane)
+* REST (device ingest plane)
+* MQTT (device ingest plane)
+* **Raw Ingest (alignment-only replication path)**
 
 Adapters:
 
@@ -138,21 +141,6 @@ No reinterpretation. No promotion. No assumptions.
 
 ---
 
-## Why Zero-Based Addressing
-
-Internally, MMA uses zero-based addressing **exclusively**.
-
-Reasons:
-
-* Eliminates off-by-one ambiguity
-* Matches Modbus PDU semantics
-* Simplifies validation and bounds checking
-* Avoids vendor-specific address offsets
-
-If a client uses 1-based notation, it must translate upstream.
-
----
-
 ## Memory Model
 
 * Memory is pre-allocated at startup
@@ -168,30 +156,29 @@ This guarantees:
 
 ---
 
-## Ingest (REST / MQTT)
+## Ingest Paths (Explicit Separation)
 
-MMA supports **atomic JSON ingest** using the same schema for REST and MQTT.
+MMA supports **three distinct write paths**, each with a fixed role.
 
-### Properties
+### 1. Modbus TCP — Control Plane
 
-* Same JSON format for REST and MQTT
-* Full validation before write
-* Batch atomicity
-* Deterministic failure behavior
+* Client-driven
+* Subject to unit-ID, function-code, and port policy
+* Used for **intent and control**
+* Never bypasses safety rules
 
 ---
 
-## REST Ingest Examples
+### 2. REST / MQTT — Device Ingest Plane
 
-### HTTP Endpoint
+* Used by gateways, simulators, edge applications
+* Canonical JSON schema (shared)
+* Full validation before write
+* Atomic batch semantics
 
-```
-POST /ingest
-Authorization: Bearer <TOKEN>
-Content-Type: application/json
-```
+Used when **meaning exists upstream**.
 
-### Example: Write Holding Registers
+Example:
 
 ```json
 {
@@ -202,80 +189,124 @@ Content-Type: application/json
 }
 ```
 
-### Example: Write Coils
-
-```json
-{
-  "memory": "plant_a",
-  "area": "coils",
-  "address": 10,
-  "values": [1, 0, 1, 1]
-}
-```
-
-### REST Failure Behavior
+Failure behavior:
 
 * Any invalid value rejects the entire request
 * No partial writes
-* HTTP error returned
 * Memory remains unchanged
 
 ---
 
-## MQTT Ingest Examples
+### 3. Raw Ingest — Alignment-Only Replication Path
 
-### Topic
+> **Raw Ingest is a direct, alignment-only TCP write path into MMA memory.**
 
-```
-mqtt/ingest
-```
+Raw Ingest is **not semantic ingest**.
 
-### Example: Write Input Registers
+It exists solely for **data replication** from weak or high-volume devices.
 
-```json
-{
-  "memory": "plant_a",
-  "area": "input_registers",
-  "address": 50,
-  "values": [1234, 5678]
-}
-```
+#### Raw Ingest Characteristics
 
-### Example: Write Discrete Inputs
+* Stateless
+* Write-only
+* Panic-free
+* Bounds-checked only
+* One packet = one atomic write
+* No retries
+* No timers
+* No freshness logic
+* No control intent
 
-```json
-{
-  "memory": "plant_a",
-  "area": "discrete_inputs",
-  "address": 0,
-  "values": [0, 1, 1, 0]
-}
-```
+Raw Ingest performs **alignment, not decode**:
 
-### MQTT Failure Behavior
+* bytes → uint16 registers
+* bytes → bit arrays
+* sequential write starting at address
 
-* Payload is fully validated before write
-* Invalid payload is rejected
-* No partial writes
-* Memory remains unchanged
+If Raw Ingest understands *meaning*, it is a bug.
 
 ---
 
-### Example: Holding Registers Ingest
+## Raw Ingest — Packet Sample (Wire-Level)
 
-```json
-{
-  "memory": "plant_a",
-  "area": "holding_registers",
-  "address": 0,
-  "values": [100, 200, 300]
-}
+This section exists to remove ambiguity for implementers.
+
+### Packet Layout (Version 1)
+
+All multi-byte fields are **Big-Endian**.
+
+```
+[ Magic(2) ][ Ver(1) ][ Flags(1) ]
+[ Area(1) ][ Rsv(1) ][ MemoryID(2) ]
+[ Address(2) ][ Count(2) ]
+[ Payload(N) ]
+[ CRC32(4) ]
 ```
 
-If **any** value is invalid:
+### Area Values
 
-* nothing is written
-* memory remains unchanged
+| Value | Area              |
+| ----: | ----------------- |
+|  0x01 | Coils             |
+|  0x02 | Discrete Inputs   |
+|  0x03 | Holding Registers |
+|  0x04 | Input Registers   |
+
+---
+
+### Example — Write Holding Registers
+
+**Intent:** write `[100, 200, 300]` starting at address `0`
+
+**Payload:**
+
+```
+00 64  00 C8  01 2C
+```
+
+**Packet (hex, CRC omitted):**
+
+```
+52 49 01 00 03 00 00 01 00 00 00 03
+00 64 00 C8 01 2C
+```
+
+One packet → one atomic write.
+
+---
+
+### Example — Write Discrete Inputs
+
+**Intent:** write `[1,0,1,1,0]` starting at address `0`
+
+**Payload (bit-packed):**
+
+```
+0001101b → 0x0D
+```
+
+**Packet (hex, CRC omitted):**
+
+```
+52 49 01 00 02 00 00 01 00 00 00 05
+0D
+```
+
+---
+
+### Rejection Rule
+
+If **any** of the following fail:
+
+* bounds check
+* payload length
+* CRC
+* structure
+
+Result:
+
+* response = `0x01`
+* **memory remains unchanged**
 
 ---
 
@@ -287,11 +318,6 @@ If **any** value is invalid:
 * Config-driven
 * IPv4 and IPv6 aware
 * Enforced at TCP accept layer
-
-If a client is not allowed:
-
-* connection is closed immediately
-* no Modbus response is sent
 
 ---
 
@@ -306,39 +332,7 @@ Per-port policy supports:
 
 Policy is enforced **before memory access**.
 
----
-
-## Failure Behavior (Explicit Guarantees)
-
-MMA guarantees:
-
-* Invalid input never mutates memory
-* Adapter failures do not crash the core
-* Memory corruption is structurally impossible
-* Illegal access returns protocol-correct errors
-
-Failure is **visible and deterministic**.
-
----
-
-## Deployment Models
-
-### Standalone Binary
-
-* Single static executable
-* No runtime dependencies
-* Suitable for edge devices
-
-### Docker / Container
-
-* One process per container
-* Stateless except memory
-* Easy horizontal replication
-
-### Embedded Library
-
-* Core can be compiled into another system
-* External system controls lifecycle
+Raw Ingest is **socket-isolated** and never shares control paths.
 
 ---
 
@@ -353,52 +347,11 @@ Restart to change behavior.
 
 ---
 
-## Where MMA Fits Best
-
-* Power plant controllers
-* Microgrid controllers
-* Industrial gateways
-* Protocol translation hubs
-* Deterministic ingest buffers
-* Simulation and test harnesses
-
----
-
-## What MMA Is Not
-
-MMA is not:
-
-* a PLC
-* a SCADA
-* a rules engine
-* an AI controller
-
-It is a **foundational primitive**, not a finished product.
-
----
-
-## Philosophy
-
-Industrial systems fail when:
-
-* semantics leak into transport
-* logic and memory are coupled
-* safety depends on convention
-* systems attempt to be clever
-
-MMA exists to do one thing correctly:
-
-> **Be a boring, deterministic, trustworthy Modbus memory appliance.**
-
-Smart systems belong upstream.
-The core should never be smart.
-
----
-
 ## Status
 
 * Stable deterministic core
 * Config-driven safety model
+* **Raw Ingest formally supported**
 * Production-safe architecture
 
 Future protocols may be added **only as adapters**.

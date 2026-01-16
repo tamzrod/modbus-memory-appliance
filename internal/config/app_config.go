@@ -4,9 +4,10 @@ package config
 // There must be exactly ONE definition of this type.
 type AppConfig struct {
 	// Core
-	Memory  MemoryConfig
-	Routing RoutingConfig
-	Ports   Ports
+	Memory    MemoryConfig
+	Routing   RoutingConfig
+	Ports     Ports
+	RawIngest RawIngestConfig `yaml:"raw_ingest"`
 
 	// Ingest / control plane
 	REST RESTConfig

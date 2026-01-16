@@ -65,7 +65,7 @@ func TestGateSealsMemory(t *testing.T) {
 
 func TestRun_DeniesHoldingAndCoilIngest(t *testing.T) {
 	mem := newTestMemoryWithSealing(1)
-	mem.Seal() // force RUN
+	_ = mem.WriteDiscreteInputs(1, []bool{true}) // hit gate → RUN
 
 	svc := New(map[string]*core.Memory{
 		"plant": mem,
@@ -94,7 +94,7 @@ func TestRun_DeniesHoldingAndCoilIngest(t *testing.T) {
 
 func TestRun_AllowsDIandIRIngest(t *testing.T) {
 	mem := newTestMemoryWithSealing(1)
-	mem.Seal()
+	_ = mem.WriteDiscreteInputs(1, []bool{true}) // hit gate → RUN
 
 	svc := New(map[string]*core.Memory{
 		"plant": mem,

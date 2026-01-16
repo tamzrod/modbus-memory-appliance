@@ -8,6 +8,8 @@ func appMain() {
 	startModbus(cfg, memories)
 	startMQTT(cfg, ingestSvc)
 	startREST(cfg, memories, ingestSvc)
+	startRawIngest(cfg, memories)
+
 
 	blockForever()
 }

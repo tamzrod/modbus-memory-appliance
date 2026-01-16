@@ -1,4 +1,4 @@
-# Modbus Memory Appliance – Architecture
+# Modbus Memory Appliance — Architecture
 
 ## Purpose
 
@@ -6,8 +6,9 @@ The Modbus Memory Appliance (MMA) is designed to be a **deterministic, minimal, 
 
 It is not a framework, not a PLC, and not a data modeler.
 
-Its job is simple:
-> **store raw Modbus memory correctly and predictably, under all conditions.**
+Its single responsibility is:
+
+> **Store raw Modbus memory correctly and predictably, under all conditions.**
 
 ---
 
@@ -16,121 +17,206 @@ Its job is simple:
 ### 1. Dumb Core, Smart Edges
 
 The core memory:
-- stores raw values only
-- enforces bounds and atomicity
-- knows nothing about meaning
 
-All intelligence lives **outside**:
-- Node-RED
-- PLCs
-- SCADA
-- Control algorithms
+* stores raw values only
+* enforces bounds and atomicity
+* knows nothing about meaning, time, or control logic
+
+All intelligence lives **outside** the core:
+
+* Node-RED
+* PLCs
+* SCADA systems
+* Control algorithms
+* External services
 
 This prevents:
-- hidden logic
-- implicit behavior
-- vendor-style magic
+
+* hidden logic
+* implicit behavior
+* vendor-style magic
 
 ---
 
 ### 2. Determinism Above All
 
-Every operation has a deterministic outcome:
+Every write operation has a deterministic outcome:
 
-- valid write → fully applied
-- invalid write → fully rejected
-- no partial state
-- no silent truncation
+* valid write → fully applied
+* invalid write → fully rejected
+* no partial state
+* no silent truncation
 
-This applies equally to:
-- MQTT
-- REST
-- Modbus writes
+This applies equally to **all write paths**:
+
+* Modbus TCP writes
+* REST ingest
+* MQTT ingest
+* Raw Ingest
 
 ---
 
 ## Memory Model
 
-- Zero-based addressing
-- Fixed-width storage
-- No dynamic resizing at runtime
+* Zero-based addressing
+* Fixed-width storage
+* No dynamic resizing at runtime
 
-### Supported Areas
+### Supported Memory Areas
 
-| Area | Storage Type |
-|-----|--------------|
-| Holding Registers | uint16 |
-| Input Registers | uint16 |
-| Coils | bool (0 / 1) |
-| Discrete Inputs | bool (0 / 1) |
+| Area              | Storage Type |
+| ----------------- | ------------ |
+| Holding Registers | uint16       |
+| Input Registers   | uint16       |
+| Coils             | bool         |
+| Discrete Inputs   | bool         |
 
-The memory layer does **not** distinguish semantics beyond size and bounds.
-
----
-
-## Atomic Ingest
-
-All ingest operations are **transactional**:
-
-- Entire batch validated first
-- Any invalid value aborts the batch
-- Memory remains unchanged on failure
-
-This is intentional.
-
-Partial writes are more dangerous than rejected writes in control systems.
+The memory layer does **not** interpret meaning beyond size and bounds.
 
 ---
 
-## Adapter Model
+## Adapter-Based Architecture
 
-Adapters are **untrusted**.
+MMA is built around **adapter isolation**.
 
-Examples:
-- MQTT
-- REST
-- future protocols
+Adapters are:
 
-Rules:
-- adapters may fail
-- adapters may disconnect
-- adapters may misbehave
+* independent
+* untrusted
+* replaceable
 
-**The core must continue running regardless.**
+They converge **only at the memory layer**.
 
-An adapter failure must never:
-- crash Modbus
-- corrupt memory
-- block other adapters
+No adapter may:
+
+* depend on another adapter
+* call another adapter
+* assume ordering guarantees
+
+---
+
+## Write Paths (Authoritative)
+
+There are **two distinct write modes**, representing **different operational scenarios**.
+
+They must be treated as **mutually exclusive at the data-source level**.
+
+```
+FIELD DEVICE (RAW)                     LOGICAL DATA SOURCE
+(meter / logger / combiner)            (controller / app / gateway)
+        |                                      |
+        v                                      v
+┌────────────────────┐              ┌────────────────────────┐
+│     RAW INGEST     │              │     REST / MQTT        │
+│      (TCP)         │              │       INGEST           │
+│ • blind writes     │              │ • semantic writes      │
+│ • no decoding      │              │ • rules & validation   │
+│ • no state         │              │ • control-aware        │
+└─────────┬──────────┘              └─────────┬──────────────┘
+          |                                      |
+          └───────────────┬──────────────────────┘
+                          v
+               ┌──────────────────────────┐
+               │        MMA MEMORY        │
+               │  (raw registers only)   │
+               └─────────┬────────────────┘
+                         v
+                      READERS
+```
+
+---
+
+## Raw Ingest (Formal Role)
+
+Raw Ingest is a **transport-level write adapter**.
+
+It exists to support:
+
+* weak or resource-limited field devices
+* high fan-out read scenarios
+* mirroring or buffering use cases
+* environments where decoding is wasteful or impossible
+
+Raw Ingest characteristics:
+
+* TCP-based binary protocol
+* stateless operation
+* blind, alignment-only writes
+* bounds checking only
+* atomic memory writes
+
+Raw Ingest **must not**:
+
+* decode values
+* scale values
+* apply rules or policies
+* track freshness or timestamps
+* infer semantics
+
+The authoritative specification for Raw Ingest is defined in:
+
+* `Docs/RAW_INGEST.md`
+
+---
+
+## Logical Ingest (REST / MQTT)
+
+Logical Ingest is a **semantic write adapter**.
+
+It exists to support:
+
+* validated control inputs
+* rule-based writes
+* state-aware behavior
+* higher-level applications
+
+Logical Ingest:
+
+* validates payloads
+* applies policy and permissions
+* may reject writes for semantic reasons
+
+---
+
+## Mandatory Separation Rule
+
+A single data source **must not** use Raw Ingest and Logical Ingest simultaneously.
+
+These paths represent **different operational modes** and must only converge at memory.
+
+Violating this rule is a configuration error.
 
 ---
 
 ## Modbus TCP Role
 
-Modbus TCP is the **authoritative interface** for external devices.
+Modbus TCP is the **authoritative external interface**.
 
-- It reads from core memory
-- It writes only where allowed by policy
-- It never bypasses validation
+* Reads from core memory
+* Writes only where allowed by policy
+* Never bypasses validation
 
-The appliance behaves like a well-defined Modbus slave:
-- predictable
-- boring
-- reliable
+The appliance behaves as a well-defined Modbus slave:
+
+* predictable
+* boring
+* reliable
 
 ---
 
 ## Configuration Model
 
-- YAML-driven
-- Explicit policies
-- No implicit defaults beyond safety
+* YAML-driven
+* Explicit policies
+* No implicit defaults beyond safety
 
 Configuration controls:
-- memory layout
-- unit ID routing
-- port access
-- function code permissions
+
+* memory layout
+* unit ID routing
+* port access
+* function code permissions
+* adapter enablement (Modbus / REST / MQTT / Raw)
 
 Configuration is **runtime-only** and intentionally excluded from Git.
 
@@ -139,69 +225,47 @@ Configuration is **runtime-only** and intentionally excluded from Git.
 ## Observability
 
 The appliance emits:
-- structured logs to stdout
-- no direct dependency on logging backends
+
+* structured logs to stdout
+* no dependency on logging backends
 
 Designed for:
-- Promtail
-- Loki
-- Grafana
+
+* Promtail
+* Loki
+* Grafana
 
 Errors are logged **only when necessary**.
 
-No log spam on success paths.
-
 ---
 
-## Non-Goals (Very Important)
+## Non-Goals (Strict)
 
 This project intentionally does NOT:
 
-- parse float32 / float64
-- scale values
-- interpret register meaning
-- provide a GUI
-- replace PLC logic
-- auto-discover devices
-- implement OPC UA or IEC 61850
+* parse float32 / float64
+* scale values
+* interpret register meaning
+* provide a GUI
+* replace PLC logic
+* auto-discover devices
+* implement OPC UA or IEC-61850
 
-If you need those features:
-- build them upstream
-- keep the core clean
-
----
-
-## Why Modbus Still Matters
-
-Modbus remains widely deployed because it is:
-- simple
-- predictable
-- universally supported
-
-This project embraces Modbus’s strengths instead of hiding them.
+Raw Ingest does **not** change these non-goals.
 
 ---
 
 ## Stability Contract
 
-The following are considered **stable guarantees**:
+The following are **stable guarantees**:
 
-- raw memory only
-- atomic writes
-- adapter isolation
-- deterministic behavior
+* raw memory only
+* atomic writes
+* adapter isolation
+* deterministic behavior
+* no semantic leakage into the core
 
-Breaking these would constitute a **major version change**.
-
----
-
-## Intended Audience
-
-This project is for:
-- control engineers
-- SCADA integrators
-- systems programmers
-- anyone who values correctness over convenience
+Breaking these requires a **major version bump**.
 
 ---
 
@@ -209,10 +273,10 @@ This project is for:
 
 The Modbus Memory Appliance is designed to be:
 
-- boring
-- predictable
-- strict
-- fast
+* boring
+* predictable
+* strict
+* fast
 
 Because in control systems:
 

@@ -1,0 +1,269 @@
+[
+    {
+        "id": "81ae958a1537db5b",
+        "type": "tab",
+        "label": "STATE SEAL",
+        "disabled": false,
+        "info": "",
+        "env": []
+    },
+    {
+        "id": "d23e2e7acee1de4d",
+        "type": "inject",
+        "z": "81ae958a1537db5b",
+        "name": "Lock",
+        "props": [
+            {
+                "p": "payload"
+            },
+            {
+                "p": "topic",
+                "vt": "str"
+            }
+        ],
+        "repeat": "",
+        "crontab": "",
+        "once": false,
+        "onceDelay": 0.1,
+        "topic": "",
+        "payload": "true",
+        "payloadType": "bool",
+        "x": 150,
+        "y": 320,
+        "wires": [
+            [
+                "62a7c8b990a2a140"
+            ]
+        ]
+    },
+    {
+        "id": "62a7c8b990a2a140",
+        "type": "function",
+        "z": "81ae958a1537db5b",
+        "name": "LockUnlock",
+        "func": "// Incoming msg.payload is expected to be true or false\n// true  = locked  -> write 0\n// false = unlocked -> write 1\n\nconst locked = Boolean(msg.payload);\n\nconst pkt = Buffer.alloc(11);\n\n// Raw Ingest header\npkt[0] = 0x52; // 'R'\npkt[1] = 0x49; // 'I'\npkt[2] = 0x01; // version\npkt[3] = 0x01; // area = coils\n\n// Identity + address\npkt.writeUInt16BE(1, 4);    // unit_id\npkt.writeUInt16BE(19, 6);   // start address (coil 19)\npkt.writeUInt16BE(1, 8);    // count = 1 coil\n\n// Payload (bit-packed, relative to start address)\npkt[10] = locked ? 0x00 : 0x01;\n\n// Send\nmsg.payload = pkt;\nreturn msg;\n",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 330,
+        "y": 340,
+        "wires": [
+            [
+                "bc98cb4b65a201b8"
+            ]
+        ]
+    },
+    {
+        "id": "f3ca5b2e2b984210",
+        "type": "inject",
+        "z": "81ae958a1537db5b",
+        "name": "Unlock",
+        "props": [
+            {
+                "p": "payload"
+            },
+            {
+                "p": "topic",
+                "vt": "str"
+            }
+        ],
+        "repeat": "",
+        "crontab": "",
+        "once": false,
+        "onceDelay": 0.1,
+        "topic": "",
+        "payload": "false",
+        "payloadType": "bool",
+        "x": 150,
+        "y": 360,
+        "wires": [
+            [
+                "62a7c8b990a2a140"
+            ]
+        ]
+    },
+    {
+        "id": "bc98cb4b65a201b8",
+        "type": "tcp request",
+        "z": "81ae958a1537db5b",
+        "name": "",
+        "server": "10.5.1.8",
+        "port": "504",
+        "out": "time",
+        "ret": "buffer",
+        "splitc": "0",
+        "newline": "",
+        "trim": false,
+        "tls": "",
+        "x": 620,
+        "y": 380,
+        "wires": [
+            [
+                "622164b3ee3c9e9f"
+            ]
+        ]
+    },
+    {
+        "id": "d1e063fe7f2c0f9f",
+        "type": "inject",
+        "z": "81ae958a1537db5b",
+        "name": "MODBUS READ COIL",
+        "props": [
+            {
+                "p": "payload"
+            },
+            {
+                "p": "topic",
+                "vt": "str"
+            }
+        ],
+        "repeat": "1",
+        "crontab": "",
+        "once": false,
+        "onceDelay": 0.1,
+        "topic": "",
+        "payload": "[0,1,0,0,0,6,1,1,0,1,0,1]",
+        "payloadType": "bin",
+        "x": 390,
+        "y": 380,
+        "wires": [
+            [
+                "bc98cb4b65a201b8"
+            ]
+        ]
+    },
+    {
+        "id": "622164b3ee3c9e9f",
+        "type": "function",
+        "z": "81ae958a1537db5b",
+        "name": "statesealinggate",
+        "func": "const bufOut1 = Buffer.from([0,1,0,0,0,3,1,129,6]);   // output 1\nconst bufOut2 = Buffer.from([0,1,0,0,0,4,1,1,1,0]);   // output 2 (example)\n\n// must be buffer\nif (!Buffer.isBuffer(msg.payload)) {\n    return null;\n}\n\n// exact match → output 1\nif (msg.payload.equals(bufOut1)) {\n    return [msg, null];\n}\n\n// exact match → output 2\nif (msg.payload.equals(bufOut2)) {\n    return [null, msg];\n}\n\n// everything else ignored\nreturn null;\n",
+        "outputs": 2,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 820,
+        "y": 380,
+        "wires": [
+            [
+                "2f16497d791c8ecc"
+            ],
+            []
+        ]
+    },
+    {
+        "id": "dbc90903159a45fa",
+        "type": "function",
+        "z": "81ae958a1537db5b",
+        "name": "unlock statesealing",
+        "func": "msg.payload = false;\nreturn msg;",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 610,
+        "y": 260,
+        "wires": [
+            [
+                "62a7c8b990a2a140"
+            ]
+        ]
+    },
+    {
+        "id": "2f16497d791c8ecc",
+        "type": "influxdb in",
+        "z": "81ae958a1537db5b",
+        "influxdb": "0efae6ae01474733",
+        "name": "",
+        "query": "from(bucket: \"7d\")\n  |> range(start: -1y)\n  |> filter(fn: (r) => r[\"_measurement\"] == \"PPC\")\n  |> filter(fn: (r) => r[\"type\"] == \"SetpointRaw\")\n  |> aggregateWindow(every: 1y, fn: last, createEmpty: false)\n  |> yield(name: \"last\")",
+        "rawOutput": false,
+        "precision": "",
+        "retentionPolicy": "",
+        "org": "sb",
+        "x": 590,
+        "y": 320,
+        "wires": [
+            [
+                "2447ae33eb5a30a7"
+            ]
+        ]
+    },
+    {
+        "id": "709258effebd555e",
+        "type": "function",
+        "z": "81ae958a1537db5b",
+        "name": "Convert to Raw Ingest",
+        "func": "const VERSION = 0x01;\nconst UNIT_ID = 1;\nconst START_ADDR = 2;\nconst AREA_HOLDING = 3;\nconst AREA_INPUT = 4;\n\n// ---------- rebuild register list ----------\nlet rows = msg.payload;\nif (!Array.isArray(rows)) return null;\n\nlet regMap = {};\nfor (let r of rows) {\n    if (!r._field?.startsWith(\"r\")) continue;\n    regMap[parseInt(r._field.slice(1))] = Number(r._value) & 0xFFFF;\n}\n\nlet max = Math.max(...Object.keys(regMap).map(Number));\nlet values = [];\nfor (let i = 0; i <= max; i++) values.push(regMap[i] ?? 0);\n\nconst COUNT = values.length;\n\n// ---------- payload buffer ----------\nlet dataBuf = Buffer.alloc(COUNT * 2);\nfor (let i = 0; i < COUNT; i++) {\n    dataBuf.writeUInt16BE(values[i], i * 2);\n}\n\n// ---------- RI builder ----------\nfunction buildPacket(area) {\n    const header = Buffer.alloc(10);\n\n    header[0] = 0x52;\n    header[1] = 0x49;\n    header[2] = VERSION;\n    header[3] = area;\n\n    header.writeUInt16BE(UNIT_ID, 4);\n    header.writeUInt16BE(START_ADDR, 6);\n    header.writeUInt16BE(COUNT, 8);\n\n    return Buffer.concat([header, dataBuf]);\n}\n\n// ---------- SEND SEPARATELY ----------\nnode.send({ payload: buildPacket(AREA_HOLDING) });\nnode.send({ payload: buildPacket(AREA_INPUT) });\n\nreturn null;\n",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 1060,
+        "y": 320,
+        "wires": [
+            [
+                "dbc90903159a45fa",
+                "bc98cb4b65a201b8"
+            ]
+        ]
+    },
+    {
+        "id": "2447ae33eb5a30a7",
+        "type": "change",
+        "z": "81ae958a1537db5b",
+        "name": "",
+        "rules": [
+            {
+                "t": "set",
+                "p": "payload[0]._value",
+                "pt": "msg",
+                "to": "16936",
+                "tot": "num"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 830,
+        "y": 320,
+        "wires": [
+            [
+                "709258effebd555e"
+            ]
+        ]
+    },
+    {
+        "id": "0efae6ae01474733",
+        "type": "influxdb",
+        "hostname": "127.0.0.1",
+        "port": "8086",
+        "protocol": "http",
+        "database": "database",
+        "name": "",
+        "usetls": false,
+        "tls": "",
+        "influxdbVersion": "2.0",
+        "url": "http://10.5.1.8:8086",
+        "timeout": "10",
+        "rejectUnauthorized": true
+    },
+    {
+        "id": "dd1217def2a24e4a",
+        "type": "global-config",
+        "env": [],
+        "modules": {
+            "node-red-contrib-influxdb": "0.7.0"
+        }
+    }
+]
